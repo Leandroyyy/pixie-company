@@ -62,7 +62,7 @@ export function PdvSessionsModal({
       await endPdvSession(pdvId, sessionId);
       await loadSessions();
     } catch (err) {
-      alert("Erro ao encerrar sessão");
+      
     } finally {
       setEndingSessionId(null);
     }

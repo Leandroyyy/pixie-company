@@ -2,7 +2,8 @@
 // Configurações da API
 // ---------------------------------------------------------------------------
 
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:3333";
+export const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL || "http://localhost:3333";
 
 // ---------------------------------------------------------------------------
 // Tipos de Dados da API
@@ -230,13 +231,24 @@ export async function fetchWithAuth(
 
   if (!response.ok) {
     let errorMsg = "Erro na requisição.";
+    let errorDetail = "";
     try {
       const clone = response.clone();
       const errorData = (await clone.json()) as ErrorResponse;
       if (errorData.message) errorMsg = errorData.message;
+      if (errorData.detail) errorDetail = errorData.detail;
     } catch {
       // Ignora erro de parse
     }
+
+    if (response.status >= 400 && response.status < 500) {
+      window.dispatchEvent(
+        new CustomEvent("pixie:toast", {
+          detail: { title: errorMsg, description: errorDetail },
+        }),
+      );
+    }
+
     throw new Error(errorMsg);
   }
 
@@ -246,6 +258,15 @@ export async function fetchWithAuth(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+export async function resendVerification(): Promise<void> {
+  const res = await fetchWithAuth("/api/auth/resend-verification", {
+    method: "POST",
+  });
+  if (!res.ok) {
+    throw new Error("Erro ao reenviar e-mail");
+  }
+}
 
 export async function fetchDashboardOverview(): Promise<DashboardOverviewResponse> {
   const res = await fetchWithAuth("/api/dashboard");
@@ -301,7 +322,9 @@ export async function fetchPdvQrCode(pdvId: string): Promise<PdvQrCodeInfo> {
   return res.json();
 }
 
-export async function configureBankConnection(formData: FormData): Promise<void> {
+export async function configureBankConnection(
+  formData: FormData,
+): Promise<void> {
   const res = await fetchWithAuth("/api/connection/bank-credentials", {
     method: "POST",
     body: formData,

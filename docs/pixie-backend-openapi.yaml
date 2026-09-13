@@ -314,6 +314,74 @@ paths:
               example:
                 message: "E-mail já cadastrado."
 
+  /api/auth/verify-email:
+    post:
+      operationId: verifyEmail
+      tags:
+        - Auth
+      summary: Verificar e-mail (ativar conta)
+      description: |
+        Recebe o token enviado por e-mail e ativa a conta correspondente.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - token
+              properties:
+                token:
+                  type: string
+                  description: O token UUID recebido por e-mail.
+      responses:
+        "200":
+          description: Conta ativada com sucesso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Conta ativada com sucesso."
+        "400":
+          description: Token inválido ou expirado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/auth/resend-verification:
+    post:
+      operationId: resendVerification
+      tags:
+        - Auth
+      summary: Reenviar e-mail de verificação
+      description: |
+        Invalida tokens anteriores não utilizados e envia um novo e-mail de verificação.
+        Requer autenticação JWT padrão (Bearer token) pois apenas o dono logado 
+        consegue solicitar o reenvio para a conta pendente dele.
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: E-mail reenviado com sucesso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "E-mail de verificação reenviado."
+        "401":
+          description: Não autorizado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/auth/login:
     post:
       operationId: authenticateOwner

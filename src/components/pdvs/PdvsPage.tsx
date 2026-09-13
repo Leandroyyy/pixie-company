@@ -65,7 +65,7 @@ export function PdvsPage({
       try {
         await onEditPdv(id, { name: newName });
       } catch (err) {
-        alert("Erro ao renomear PDV");
+        
       }
     }
   };
@@ -80,7 +80,7 @@ export function PdvsPage({
       try {
         await onEditPdv(id, { status: newStatus });
       } catch (err) {
-        alert("Erro ao alterar status");
+        
       }
     }
   };
@@ -96,7 +96,7 @@ export function PdvsPage({
         setGeneratedCode({ code: result.accessCode, pdvName });
         window.scrollTo(0, 0);
       } catch (err) {
-        alert("Erro ao gerar novo código");
+        
       }
     }
   };

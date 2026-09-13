@@ -150,7 +150,7 @@ export function SecurityPage() {
       addLog("Chave Pix atualizada com sucesso. PDVs recriando QR Codes...");
     } catch (err: any) {
       addLog(`Erro ao salvar chave Pix: ${err.message}`);
-      alert("Erro ao salvar chave Pix");
+      
     } finally {
       setSavingPix(false);
     }

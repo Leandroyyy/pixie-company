@@ -1,6 +1,7 @@
 import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AppLayout } from "./components/layout/AppLayout";
 import { ProtectedRoute } from "./components/layout/ProtectedRoute";
+import { ToastContainer } from "./components/ui/ToastContainer";
 import { AuthProvider } from "./contexts/AuthContext";
 import { PdvProvider } from "./contexts/PdvContext";
 import DashboardPage from "./pages/DashboardPage";
@@ -11,6 +12,7 @@ import SecurityPage from "./pages/SecurityPage";
 export default function App() {
   return (
     <HashRouter>
+      <ToastContainer />
       <AuthProvider>
         <PdvProvider>
           <Routes>

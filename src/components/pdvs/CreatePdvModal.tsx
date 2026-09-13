@@ -42,7 +42,7 @@ export function CreatePdvModal({
       setStep("success");
     } catch (err) {
       setStep("form");
-      alert("Erro ao criar PDV");
+      
     }
   };
 
@@ -53,7 +53,7 @@ export function CreatePdvModal({
       await onActivate(createdData.id);
       setIsActivated(true);
     } catch (err) {
-      alert("Erro ao ativar PDV");
+      
     } finally {
       setActivating(false);
     }

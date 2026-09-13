@@ -2,6 +2,7 @@ import { MailWarning, Settings2 } from "lucide-react";
 import { useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
+import { resendVerification } from "../../lib/api";
 import { MobileTopBar, Sidebar } from "./Sidebar";
 
 // ---------------------------------------------------------------------------
@@ -82,6 +83,9 @@ export function AppLayout() {
                         completo ao sistema.
                       </p>
                     </div>
+                    <div className="mt-4">
+                      <ResendTokenButton />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -92,5 +96,42 @@ export function AppLayout() {
         </main>
       </div>
     </div>
+  );
+}
+
+function ResendTokenButton() {
+  const [loading, setLoading] = useState(false);
+
+  return (
+    <button
+      type="button"
+      disabled={loading}
+      onClick={async () => {
+        setLoading(true);
+        try {
+          await resendVerification();
+          window.dispatchEvent(
+            new CustomEvent("pixie:toast", {
+              detail: {
+                title: "Token reenviado",
+                description: "Verifique sua caixa de e-mail para ativar sua conta.",
+                type: "success",
+              },
+            })
+          );
+        } catch (err) {
+          // Erros 4xx já são tratados pelo Toast global
+        } finally {
+          setLoading(false);
+        }
+      }}
+      className={`rounded-md px-3 py-2 text-[13px] font-medium focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 focus:ring-offset-amber-50 transition-colors ${
+        loading
+          ? "bg-amber-200 text-amber-600 cursor-not-allowed"
+          : "bg-amber-100 text-amber-800 hover:bg-amber-200"
+      }`}
+    >
+      {loading ? "Reenviando..." : "Reenviar token"}
+    </button>
   );
 }
