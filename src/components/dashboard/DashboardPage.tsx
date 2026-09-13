@@ -1,5 +1,5 @@
 import { LayoutGrid, Store, TrendingDown, Wallet } from "lucide-react";
-import type { Pdv } from "../../data/initialPdvs";
+import type { DashboardOverviewResponse } from "../../lib/api";
 import { BRL } from "../../lib/helpers";
 import { Card } from "../ui/Card";
 import { Eyebrow } from "../ui/Eyebrow";
@@ -11,18 +11,19 @@ import { KPI } from "./KPI";
 // ---------------------------------------------------------------------------
 
 interface DashboardPageProps {
-  pdvs: Pdv[];
+  data: DashboardOverviewResponse;
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export function DashboardPage({ pdvs }: DashboardPageProps) {
-  const totalMonth = pdvs.reduce((s, p) => s + p.month, 0);
-  const totalToday = pdvs.reduce((s, p) => s + p.today, 0);
-  const savings = totalMonth * 0.01;
-  const activePdvs = pdvs.filter((p) => p.status === "ativo").length;
+export function DashboardPage({ data }: DashboardPageProps) {
+
+  const totalTransactions = data.pdvs.reduce(
+    (s, p) => s + p.transactionsThisMonth,
+    0
+  );
 
   return (
     <div className="space-y-5 sm:space-y-6">
@@ -30,26 +31,26 @@ export function DashboardPage({ pdvs }: DashboardPageProps) {
         <KPI
           icon={Wallet}
           eyebrow="Recebido hoje"
-          value={BRL(totalToday)}
-          sub={`${pdvs.reduce((s, p) => s + p.tx, 0)} transações no mês`}
+          value={BRL(data.totalTodayCents / 100)}
+          sub={`${totalTransactions} transações no mês`}
         />
         <KPI
           icon={TrendingDown}
           eyebrow="Economia em taxas"
-          value={BRL(savings)}
+          value={BRL(data.estimatedSavingsCents / 100)}
           sub="vs. 1% do Pix Comercial"
           tone="good"
         />
         <KPI
           icon={LayoutGrid}
           eyebrow="Volume do mês"
-          value={BRL(totalMonth)}
+          value={BRL(data.totalMonthCents / 100)}
           sub="acumulado, todos os PDVs"
         />
         <KPI
           icon={Store}
           eyebrow="PDVs ativos"
-          value={`${activePdvs} / ${pdvs.length}`}
+          value={`${data.activePdvs} / ${data.totalPdvs}`}
           sub="pontos de venda conectados"
         />
       </div>
@@ -76,20 +77,20 @@ export function DashboardPage({ pdvs }: DashboardPageProps) {
             </tr>
           </thead>
           <tbody className="divide-y divide-stone-100">
-            {pdvs.map((p) => (
+            {data.pdvs.map((p) => (
               <tr key={p.id} className="text-[13px] text-stone-700">
                 <td className="px-5 py-3 font-medium">{p.name}</td>
                 <td className="px-5 py-3 font-mono text-stone-500">
                   {p.prefix}-****
                 </td>
                 <td className="px-5 py-3 font-mono tabular-nums">
-                  {BRL(p.today)}
+                  {BRL(p.todayCents / 100)}
                 </td>
                 <td className="px-5 py-3 font-mono tabular-nums text-stone-500">
-                  {BRL(p.month)}
+                  {BRL(p.monthCents / 100)}
                 </td>
                 <td className="px-5 py-3">
-                  <StatusPill status={p.status} />
+                  <StatusPill status={p.status as any} />
                 </td>
               </tr>
             ))}
@@ -98,20 +99,20 @@ export function DashboardPage({ pdvs }: DashboardPageProps) {
 
         {/* stacked cards on mobile */}
         <div className="divide-y divide-stone-100 sm:hidden">
-          {pdvs.map((p) => (
+          {data.pdvs.map((p) => (
             <div key={p.id} className="px-4 py-3.5">
               <div className="mb-2 flex items-center justify-between">
                 <div className="text-[13.5px] font-medium text-stone-800">
                   {p.name}
                 </div>
-                <StatusPill status={p.status} />
+                <StatusPill status={p.status as any} />
               </div>
               <div className="flex items-center justify-between text-[12px]">
                 <span className="font-mono text-stone-400">
                   {p.prefix}-****
                 </span>
                 <span className="font-mono tabular-nums text-stone-600">
-                  hoje <span className="text-stone-800">{BRL(p.today)}</span>
+                  hoje <span className="text-stone-800">{BRL(p.todayCents / 100)}</span>
                 </span>
               </div>
             </div>

@@ -1,21 +1,23 @@
 import { CircleDot } from "lucide-react";
-import type { PdvStatus } from "../../data/initialPdvs";
+import type { PdvStatus } from "../../lib/api";
 
 interface StatusPillProps {
   status: PdvStatus;
 }
 
-const styleMap: Record<PdvStatus, string> = {
+const styleMap: Record<string, string> = {
   ativo: "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200",
   pendente: "bg-amber-50 text-amber-700 ring-1 ring-amber-200",
+  inativo: "bg-stone-100 text-stone-500 ring-1 ring-stone-200",
   matched: "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200",
   aguardando: "bg-stone-100 text-stone-500 ring-1 ring-stone-200",
   risco: "bg-rose-50 text-rose-700 ring-1 ring-rose-200",
 };
 
-const labelMap: Record<PdvStatus, string> = {
+const labelMap: Record<string, string> = {
   ativo: "Ativo",
   pendente: "Pendente",
+  inativo: "Inativo",
   matched: "Conciliado",
   aguardando: "Aguardando",
   risco: "Atenção",

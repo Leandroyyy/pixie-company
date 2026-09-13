@@ -1,13 +1,15 @@
+import type { LucideIcon } from "lucide-react";
 import {
   LayoutGrid,
+  LogOut,
   Menu,
   Radio,
   ShieldCheck,
   Store,
   X,
 } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
+import { useAuth } from "../../contexts/AuthContext";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -36,6 +38,7 @@ const items: NavItem[] = [
 
 export function Sidebar({ open, onClose }: SidebarProps) {
   const { pathname } = useLocation();
+  const { account, logout } = useAuth();
 
   return (
     <>
@@ -98,20 +101,30 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           })}
         </nav>
 
-        <div className="border-t border-emerald-900/70 px-4 py-4">
-          <div className="flex items-center gap-2.5 rounded-md bg-emerald-900/40 px-3 py-2.5">
-            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-700 font-mono text-[11px] font-semibold text-emerald-50">
-              LB
-            </div>
-            <div className="min-w-0">
-              <div className="truncate text-[12.5px] text-stone-100">
-                Loja do Bairro Ltda
+        <div className="border-t border-emerald-900/70 px-4 py-4 flex flex-col gap-2">
+          {account && (
+            <div className="flex items-center gap-2.5 rounded-md bg-emerald-900/40 px-3 py-2.5">
+              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-700 font-mono text-[11px] font-semibold text-emerald-50">
+                {account.businessName.substring(0, 2).toUpperCase()}
               </div>
-              <div className="font-mono text-[10px] text-emerald-500">
-                conta verificada
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[12.5px] text-stone-100">
+                  {account.businessName}
+                </div>
+                <div className="font-mono text-[10px] text-emerald-500">
+                  {account.status.replace("_", " ")}
+                </div>
               </div>
             </div>
-          </div>
+          )}
+
+          <button
+            onClick={logout}
+            className="flex w-full items-center justify-center gap-2 rounded-md bg-emerald-900/40 px-3 py-2 text-[12.5px] text-stone-300 hover:bg-emerald-800/60 hover:text-white transition-colors cursor-pointer"
+          >
+            <LogOut className="h-4 w-4" />
+            Sair da conta
+          </button>
         </div>
       </aside>
     </>

@@ -1,0 +1,1864 @@
+openapi: "3.0.3"
+
+info:
+  title: Pixie (PixFree) — API do Painel do Dono
+  version: "0.2.0"
+  description: |
+    API do backend Pixie que serve os dados da tela **Visão Geral** do
+    Painel do Dono. Atualmente em fase simulada — persistência em memória
+    por trás de interfaces de repositório (Clean Architecture), pronta
+    para trocar por Oracle NoSQL sem alterar domínio, casos de uso ou HTTP.
+
+    ### Convenções
+
+    - **Valores monetários** são sempre em **centavos** (`integer`).
+      Divida por 100 no frontend para exibir em R$.
+    - **Autenticação** via JWT (Bearer token). Rotas protegidas exigem
+      o header `Authorization: Bearer <accessToken>`. O `accountId` é
+      extraído do token — não existe mais o header `x-account-id`.
+
+    ### Fluxo de autenticação
+
+    1. `POST /api/auth/register` — cria conta + dono (público)
+    2. `POST /api/auth/login` — retorna `accessToken` (15min) + `refreshToken`
+    3. Usar `accessToken` no header `Authorization: Bearer <token>` em rotas protegidas
+    4. Quando o access token expirar, chamar `POST /api/auth/refresh` com o `refreshToken`
+    5. `DELETE /api/auth/logout` — revoga todos os refresh tokens (requer autenticação)
+
+    ### Segurança
+
+    - Login com e-mail inexistente e senha errada retornam **a mesma mensagem** (`401`)
+    - 5 tentativas erradas consecutivas travam o login por 15 minutos (`423`)
+    - Refresh tokens são de uso único — ao rotacionar, o antigo é invalidado
+  contact:
+    name: Pixie Backend
+  license:
+    name: Privado
+
+servers:
+  - url: http://localhost:3333
+    description: Servidor local de desenvolvimento
+
+tags:
+  - name: Health
+    description: Healthcheck da aplicação
+  - name: Auth
+    description: Autenticação — registro, login, refresh e logout (UC07)
+  - name: Dashboard
+    description: Dados da tela "Visão Geral" do Painel do Dono (UC06)
+  - name: Bank Connection
+    description: Gerenciamento da conexão com o banco e credenciais mTLS
+  - name: Pix Keys
+    description: Gerenciamento de chaves Pix
+  - name: PDVs
+    description: Gerenciamento de Pontos de Venda (caixas)
+
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      tags:
+        - Health
+      summary: Healthcheck
+      description: |
+        Retorna o status da aplicação. Utilizado para validar que o
+        servidor está respondendo corretamente.
+      responses:
+        "200":
+          description: Serviço operacional
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              example:
+                status: ok
+                service: pixie-backend
+
+
+  # -------------------------------------------------------------------
+  # Pix Keys (protegido)
+  # -------------------------------------------------------------------
+
+  /api/pix-keys:
+    get:
+      operationId: getActivePixKey
+      tags:
+        - Pix Keys
+      summary: Obter chave Pix ativa
+      description: Retorna a chave Pix atualmente configurada e ativa para a conta.
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Chave Pix encontrada com sucesso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  key:
+                    type: string
+                    example: "12345678909"
+                  type:
+                    type: string
+                    enum: [cpf, cnpj, email, telefone, evp]
+                    example: "cpf"
+        "401":
+          description: Não autorizado
+        "404":
+          description: Nenhuma chave Pix ativa encontrada
+        "500":
+          description: Erro interno do servidor
+
+    put:
+      operationId: configurePixKey
+      tags:
+        - Pix Keys
+      summary: Configurar chave Pix
+      description: |
+        Configura uma nova chave Pix para a conta. Se já existir uma chave ativa, ela será desativada.
+        Todos os QR Codes dos PDVs ativos serão regenerados automaticamente para apontar para a nova chave.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - key
+                - type
+              properties:
+                key:
+                  type: string
+                  description: O valor da chave Pix
+                  example: "12345678909"
+                type:
+                  type: string
+                  enum: [cpf, cnpj, email, telefone, evp]
+                  description: O tipo da chave Pix
+                  example: "cpf"
+      responses:
+        "204":
+          description: Chave Pix configurada com sucesso
+        "400":
+          description: Parâmetros inválidos
+        "401":
+          description: Não autorizado
+        "500":
+          description: Erro interno do servidor
+
+  # -------------------------------------------------------------------
+  # Bank Connection (protegido)
+  # -------------------------------------------------------------------
+
+  /api/connection/bank-credentials:
+    post:
+      operationId: configureBankConnection
+      tags:
+        - Bank Connection
+      summary: Configurar conexão com o banco
+      description: |
+        Faz upload dos certificados e chaves de API para conexão com o banco.
+        Testa a comunicação via mTLS antes de persistir os dados no OCI Vault.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - clientId
+                - clientSecret
+                - certificate
+                - privateKey
+              properties:
+                clientId:
+                  type: string
+                  description: Client ID do Banco Inter.
+                clientSecret:
+                  type: string
+                  description: Client Secret do Banco Inter.
+                certificate:
+                  type: string
+                  format: binary
+                  description: Arquivo do certificado público (.crt).
+                privateKey:
+                  type: string
+                  format: binary
+                  description: Arquivo da chave privada (.key).
+      responses:
+        "200":
+          description: Conexão configurada e validada com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConfigureBankConnectionResponse"
+        "400":
+          description: Erro de validação ou certificado rejeitado (ex. certificado inválido, incompatível com chave)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Não autorizado (token inválido ou ausente)
+
+    delete:
+      operationId: revokeBankConnection
+      tags:
+        - Bank Connection
+      summary: Revogar conexão bancária
+      description: |
+        Marca a conexão atual como revogada e agenda a deleção das credenciais no OCI Vault.
+      security:
+        - BearerAuth: []
+      responses:
+        "204":
+          description: Conexão revogada com sucesso
+        "401":
+          description: Não autorizado
+        "404":
+          description: Conexão não encontrada ou não configurada
+
+  /api/connection/bank-credentials/status:
+    get:
+      operationId: getBankConnectionStatus
+      tags:
+        - Bank Connection
+      summary: Obter status da conexão
+      description: |
+        Retorna o status atual da integração com o banco, incluindo dias restantes para o vencimento do certificado.
+        Não testa a comunicação em tempo real; devolve apenas metadados.
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Status da conexão retornado com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetBankConnectionStatusResponse"
+        "401":
+          description: Não autorizado
+
+  # -------------------------------------------------------------------
+  # Auth
+  # -------------------------------------------------------------------
+
+  /api/auth/register:
+    post:
+      operationId: registerAccount
+      tags:
+        - Auth
+      summary: Registrar conta e dono
+      description: |
+        Cria uma nova **Account** (negócio) e um **Owner** (pessoa que
+        faz login) no mesmo fluxo. A conta nasce em `pendente_verificacao`.
+
+        Validações:
+        - E-mail já cadastrado → `409`
+        - Documento (CPF/CNPJ) já cadastrado → `409`
+        - Documento com dígito verificador inválido → `400`
+        - Senha com menos de 12 caracteres ou na blocklist → `400`
+
+        > **Compromisso conhecido:** no cadastro é impossível esconder que
+        > o e-mail já existe sem quebrar a usabilidade. Mitigação usual é
+        > rate limit nesta rota (ainda não implementado).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+            example:
+              businessName: "Loja do Centro Ltda"
+              document: "529.982.247-25"
+              ownerName: "João Silva"
+              email: "joao@lojadocentro.com.br"
+              password: "minhasenha12345"
+      responses:
+        "201":
+          description: Conta e dono criados com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegisterResponse"
+              example:
+                account:
+                  id: "bf82129a-994a-4ef2-b482-471e356bea98"
+                  businessName: "Loja do Centro Ltda"
+                  document: "529.982.247-25"
+                  status: pendente_verificacao
+                owner:
+                  id: "82f55422-ec34-4b30-9062-d0e03a8f9e44"
+                  name: "João Silva"
+                  email: "joao@lojadocentro.com.br"
+                  role: proprietario
+        "400":
+          description: Dados de entrada inválidos (documento, senha ou e-mail malformado)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                message: "Senha deve ter no mínimo 12 caracteres."
+        "409":
+          description: E-mail ou documento já cadastrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                message: "E-mail já cadastrado."
+
+  /api/auth/login:
+    post:
+      operationId: authenticateOwner
+      tags:
+        - Auth
+      summary: Autenticar dono (login)
+      description: |
+        Autentica o dono da conta com e-mail e senha. Retorna um par de
+        tokens: `accessToken` (JWT, 15min) e `refreshToken` (opaco, uso único).
+
+        **Proteções de segurança implementadas:**
+
+        1. **Erro genérico** — e-mail inexistente e senha errada retornam
+           a mesma mensagem (`"E-mail ou senha inválidos."`) para impedir
+           enumeração de contas.
+        2. **Timing attack** — quando o e-mail não existe, o servidor gasta
+           o mesmo tempo que gastaria verificando uma senha real.
+        3. **Lockout** — após 5 tentativas erradas consecutivas, a conta é
+           travada por 15 minutos. A 6ª tentativa retorna `423` mesmo com
+           a senha correta.
+        4. **E-mail malformado** — retorna `401` (não `400`), para não
+           confirmar que o formato seria aceito.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+            example:
+              email: "dono@lojadobairro.com.br"
+              password: "senha12345678"
+      responses:
+        "200":
+          description: Login bem-sucedido
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+              example:
+                accessToken: "eyJhbGciOiJIUzI1NiIs..."
+                expiresIn: 900
+                refreshToken: "Neb00hDjS8eIz1onq8Ch..."
+                owner:
+                  id: owner_1
+                  name: "Dono da Loja"
+                  email: "dono@lojadobairro.com.br"
+                  role: proprietario
+                  emailVerified: true
+                  lastLoginAt: "2026-09-07T18:13:53.754Z"
+                account:
+                  id: acc_1
+                  businessName: "Loja do Bairro Ltda"
+                  document: "12.345.678/0001-95"
+                  status: ativa
+        "401":
+          description: Credenciais inválidas (e-mail inexistente ou senha errada)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                message: "E-mail ou senha inválidos."
+        "409":
+          description: Conta suspensa ou encerrada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                message: "Conta suspensa. Entre em contato com o suporte."
+        "423":
+          description: Conta temporariamente bloqueada por excesso de tentativas
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                message: "Conta temporariamente bloqueada. Tente novamente mais tarde."
+
+  /api/auth/refresh:
+    post:
+      operationId: refreshToken
+      tags:
+        - Auth
+      summary: Renovar tokens (refresh)
+      description: |
+        Rotaciona o refresh token: invalida o token antigo e emite um novo
+        par `accessToken` + `refreshToken`. Cada refresh token é de **uso
+        único** — reutilizar um token já rotacionado retorna `401`.
+
+        Isso impede replay de tokens roubados: se um atacante captura o
+        refresh token e o usa antes do usuário legítimo, o token legítimo
+        para de funcionar e o usuário é forçado a re-logar (detectando
+        a invasão).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+            example:
+              refreshToken: "Neb00hDjS8eIz1onq8Ch..."
+      responses:
+        "200":
+          description: Tokens renovados com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefreshResponse"
+              example:
+                accessToken: "eyJhbGciOiJIUzI1NiIs..."
+                expiresIn: 900
+                refreshToken: "uzKUIGAXmvzDyHa-1cYA..."
+        "400":
+          description: Refresh token não fornecido
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                message: "Refresh token é obrigatório."
+        "401":
+          description: Refresh token inválido ou já utilizado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                message: "Refresh token inválido ou expirado."
+
+  /api/auth/logout:
+    delete:
+      operationId: logout
+      tags:
+        - Auth
+      summary: Encerrar todas as sessões (logout)
+      description: |
+        Revoga **todos** os refresh tokens do owner autenticado,
+        efetivamente encerrando todas as sessões ativas. Os access tokens
+        já emitidos continuam válidos até expirar (máximo 15min), mas
+        não poderão ser renovados.
+
+        Requer autenticação via `Authorization: Bearer <accessToken>`.
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Todas as sessões encerradas
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - message
+                properties:
+                  message:
+                    type: string
+                    example: "Todas as sessões foram encerradas."
+        "401":
+          description: Token não fornecido ou inválido
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                message: "Token de autenticação não fornecido."
+
+  # -------------------------------------------------------------------
+  # Dashboard (protegido)
+  # -------------------------------------------------------------------
+
+  /api/dashboard:
+    get:
+      operationId: getDashboardOverview
+      tags:
+        - Dashboard
+      summary: Obter visão geral do dashboard
+      description: |
+        Retorna os dados consolidados da tela **Visão Geral** do Painel do Dono,
+        incluindo:
+
+        - **4 cards de KPI** no topo: faturamento do dia, faturamento do mês,
+          economia estimada em taxas e quantidade de PDVs ativos.
+        - **Tabela "Resumo por PDV"**: um objeto por ponto de venda com totais
+          individuais de hoje, do mês e contagem de transações.
+
+        A economia estimada (`estimatedSavingsCents`) é calculada aplicando a
+        taxa de referência do Pix Cobrança (~1%) sobre o faturamento mensal —
+        representando o quanto o lojista está economizando ao usar o Pixie
+        (QR Code estático) em vez de Pix Cobrança convencional.
+
+        **Requer autenticação.** O `accountId` é extraído automaticamente do
+        token JWT — não é necessário (nem possível) enviar via header.
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Dados do dashboard carregados com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardOverviewResponse"
+              example:
+                totalTodayCents: 207250
+                totalMonthCents: 3560440
+                estimatedSavingsCents: 35604
+                activePdvs: 2
+                totalPdvs: 3
+                pdvs:
+                  - id: pdv_1
+                    name: "Caixa Balcão"
+                    prefix: CXB
+                    status: ativo
+                    todayCents: 84250
+                    monthCents: 1481400
+                    transactionsThisMonth: 10
+                  - id: pdv_2
+                    name: "Loja Shopping Sul"
+                    prefix: LSS
+                    status: ativo
+                    todayCents: 123000
+                    monthCents: 1608040
+                    transactionsThisMonth: 8
+                  - id: pdv_3
+                    name: "Delivery / App"
+                    prefix: DLV
+                    status: pendente
+                    todayCents: 0
+                    monthCents: 421000
+                    transactionsThisMonth: 3
+        "401":
+          description: Token não fornecido ou inválido
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                message: "Token de autenticação não fornecido."
+        "500":
+          description: Erro interno ao carregar o dashboard
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                message: "Não foi possível carregar o dashboard."
+                detail: "Erro desconhecido"
+
+  # -------------------------------------------------------------------
+  # PDVs (protegido)
+  # -------------------------------------------------------------------
+
+  /api/pdvs:
+    get:
+      operationId: listPdvs
+      tags:
+        - PDVs
+      summary: Listar pontos de venda
+      description: |
+        Lista todos os PDVs da conta autenticada, com totais de faturamento
+        agregados. O código de acesso NUNCA é retornado aqui, apenas a máscara `••••••`.
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Lista de PDVs carregada com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PdvListResponse"
+        "401":
+          description: Token não fornecido ou inválido
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Erro interno ao listar PDVs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    post:
+      operationId: createPdv
+      tags:
+        - PDVs
+      summary: Criar ponto de venda
+      description: |
+        Cria um novo PDV para a conta autenticada.
+        O código de acesso é gerado automaticamente (6 dígitos) e é retornado em
+        **texto plano APENAS NESTA RESPOSTA**. O banco de dados armazena apenas
+        o hash do código.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePdvRequest"
+            example:
+              name: "Caixa 2 — Loja Centro"
+      responses:
+        "201":
+          description: PDV criado com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatePdvResponse"
+        "400":
+          description: Nome do PDV em branco ou maior que 60 caracteres
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Token não fornecido ou inválido
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: O papel do usuário logado não tem permissão para criar PDVs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: A conta não está ativa
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Erro interno ao criar PDV
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/pdvs/{id}/rotate-access-code:
+    post:
+      operationId: rotatePdvAccessCode
+      tags:
+        - PDVs
+      summary: Rotacionar código de acesso
+      description: |
+        Gera um novo código de acesso de 6 dígitos para o PDV especificado, invalidando
+        o anterior. O novo código em **texto plano é retornado apenas nesta resposta**.
+
+        **Isolamento de tenant:** se o PDV existir mas pertencer a outra conta, retorna `404` (e não `403`) para não permitir que invasores descubram IDs de PDVs de terceiros.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID do PDV
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Código rotacionado com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RotateAccessCodeResponse"
+        "401":
+          description: Token não fornecido ou inválido
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: O papel do usuário logado não tem permissão para rotacionar códigos
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: PDV não encontrado ou não pertence a esta conta
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: A conta não está ativa
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Erro interno ao rotacionar código de acesso
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/pdvs/{id}:
+    patch:
+      operationId: updatePdv
+      tags:
+        - PDVs
+      summary: Atualizar PDV
+      description: |
+        Atualiza propriedades de um ponto de venda. 
+        Pode ser usado para alterar o nome ou o status ("ativo" ou "inativo").
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID do PDV
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: Novo nome do PDV (opcional)
+                status:
+                  type: string
+                  enum: [ativo, inativo]
+                  description: Novo status do PDV (opcional)
+      responses:
+        "204":
+          description: PDV atualizado com sucesso
+        "400":
+          description: Dados inválidos
+        "401":
+          description: Não autorizado
+        "404":
+          description: PDV não encontrado
+        "500":
+          description: Erro interno ao atualizar PDV
+
+  /api/pdvs/{id}/sessions:
+    get:
+      operationId: getPdvSessions
+      tags:
+        - PDVs
+      summary: Listar sessões do PDV
+      description: |
+        Retorna as sessões ativas e expiradas do vendedor associadas a este PDV.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID do PDV
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Lista de sessões
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PdvSession"
+        "401":
+          description: Não autorizado
+        "404":
+          description: PDV não encontrado
+        "500":
+          description: Erro interno
+
+  /api/pdvs/{id}/sessions/{sid}:
+    delete:
+      operationId: endPdvSession
+      tags:
+        - PDVs
+      summary: Encerrar sessão do PDV
+      description: |
+        Encerra uma sessão específica (faz o vendedor ser deslogado na próxima requisição).
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID do PDV
+          schema:
+            type: string
+        - name: sid
+          in: path
+          required: true
+          description: ID da Sessão
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Sessão encerrada com sucesso
+        "401":
+          description: Não autorizado
+        "404":
+          description: PDV ou Sessão não encontrada
+        "500":
+          description: Erro interno
+
+  /api/pdvs/{id}/qrcode:
+    get:
+      operationId: getPdvQrCode
+      tags:
+        - PDVs
+      summary: Obter QR Code do PDV
+      description: |
+        Retorna o payload EMV e URLs das imagens do QR Code estático do PDV.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID do PDV
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Dados do QR Code carregados
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PdvQrCodeInfo"
+        "401":
+          description: Não autorizado
+        "404":
+          description: PDV não encontrado
+        "500":
+          description: Erro interno
+
+  /api/pdvs/{id}/qrcode/regenerate:
+    post:
+      operationId: regeneratePdvQrCode
+      tags:
+        - PDVs
+      summary: Regenerar QR Code
+      description: |
+        Gera um novo QR Code estático para o PDV (invalida o antigo).
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID do PDV
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Novo QR Code gerado com sucesso
+        "401":
+          description: Não autorizado
+        "404":
+          description: PDV não encontrado
+        "500":
+          description: Erro interno
+
+  # -------------------------------------------------------------------
+  # Seller Auth
+  # -------------------------------------------------------------------
+  /api/seller/login:
+    post:
+      operationId: sellerLogin
+      tags:
+        - Seller
+      summary: Autenticação do Vendedor (PDV)
+      description: |
+        Autentica o vendedor em um PDV usando o slug da loja e código de acesso.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SellerLoginRequest"
+      responses:
+        "200":
+          description: Vendedor autenticado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SellerLoginResponse"
+        "401":
+          description: Credenciais inválidas
+
+  /api/seller/refresh:
+    post:
+      operationId: sellerRefresh
+      tags:
+        - Seller
+      summary: Atualizar token do vendedor
+      description: |
+        Renova a sessão do vendedor usando refreshToken.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+      responses:
+        "200":
+          description: Token renovado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SellerRefreshResponse"
+        "401":
+          description: Sessão inválida ou expirada
+
+  /api/seller/logout:
+    delete:
+      operationId: sellerLogout
+      tags:
+        - Seller
+      summary: Logout do vendedor
+      description: |
+        Encerra a sessão do vendedor. Requer autenticação do vendedor.
+      security:
+        - SellerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+      responses:
+        "204":
+          description: Sessão encerrada
+        "401":
+          description: Não autorizado
+
+  # -------------------------------------------------------------------
+  # Seller Protected
+  # -------------------------------------------------------------------
+  /api/seller/context:
+    get:
+      operationId: getSellerContext
+      tags:
+        - Seller
+      summary: Obter contexto do PDV
+      description: |
+        Retorna informações da loja, PDV e status de prontidão (readiness) para o vendedor.
+      security:
+        - SellerAuth: []
+      responses:
+        "200":
+          description: Contexto do PDV
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SellerContextResponse"
+        "401":
+          description: Não autorizado
+
+  /api/seller/receipts/today:
+    get:
+      operationId: getSellerReceiptsToday
+      tags:
+        - Seller
+      summary: Recebimentos de hoje (PDV)
+      description: |
+        Retorna os recebimentos confirmados de hoje para este PDV.
+      security:
+        - SellerAuth: []
+      responses:
+        "200":
+          description: Lista de recebimentos de hoje
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SellerReceiptsResponse"
+        "401":
+          description: Não autorizado
+
+  /api/seller/receipts:
+    get:
+      operationId: getSellerReceipts
+      tags:
+        - Seller
+      summary: Histórico de Recebimentos (PDV)
+      description: |
+        Retorna o histórico de recebimentos do PDV. Pode filtrar por data.
+      security:
+        - SellerAuth: []
+      parameters:
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Lista de recebimentos
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SellerReceiptsResponse"
+        "401":
+          description: Não autorizado
+
+  /api/seller/qrcode:
+    get:
+      operationId: getSellerQrCode
+      tags:
+        - Seller
+      summary: Obter QR Code de pagamento
+      description: |
+        Retorna as informações do QR Code estático do PDV para cobrança.
+      security:
+        - SellerAuth: []
+      responses:
+        "200":
+          description: Dados do QR Code
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PdvQrCodeInfo"
+        "401":
+          description: Não autorizado
+
+  # -------------------------------------------------------------------
+  # Rotas não encontradas (catch-all)
+  # -------------------------------------------------------------------
+  # Qualquer rota não mapeada retorna 404 com o schema ErrorNotFound.
+  # Documentado aqui para que o frontend saiba o formato de erro padrão.
+
+components:
+  # -----------------------------------------------------------------
+  # Security Schemes
+  # -----------------------------------------------------------------
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Access token JWT obtido via `POST /api/auth/login` ou
+        `POST /api/auth/refresh`. Expira em 15 minutos.
+    SellerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Access token JWT obtido via `POST /api/seller/login` ou
+        `POST /api/seller/refresh`.
+
+  # -----------------------------------------------------------------
+  # Schemas
+  # -----------------------------------------------------------------
+  schemas:
+    # ---------------------------------------------------------------
+    # Health
+    # ---------------------------------------------------------------
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - service
+      properties:
+        status:
+          type: string
+          description: Status do serviço
+          enum:
+            - ok
+          example: ok
+        service:
+          type: string
+          description: Nome do serviço
+          example: pixie-backend
+
+    # ---------------------------------------------------------------
+    # Auth — Requests
+    # ---------------------------------------------------------------
+    RegisterRequest:
+      type: object
+      description: Dados para registro de conta e dono.
+      required:
+        - businessName
+        - document
+        - ownerName
+        - email
+        - password
+      properties:
+        businessName:
+          type: string
+          description: Razão social ou nome fantasia do negócio.
+          example: "Loja do Centro Ltda"
+        document:
+          type: string
+          description: |
+            CPF (11 dígitos) ou CNPJ (14 dígitos), com ou sem máscara.
+            O dígito verificador é validado — sequências repetidas como
+            `111.111.111-11` são rejeitadas.
+          example: "529.982.247-25"
+        ownerName:
+          type: string
+          description: Nome completo do dono do negócio.
+          example: "João Silva"
+        email:
+          type: string
+          format: email
+          description: |
+            E-mail do dono. Normalizado internamente (trim + lowercase).
+            Máximo 254 caracteres.
+          example: "joao@lojadocentro.com.br"
+        password:
+          type: string
+          format: password
+          description: |
+            Senha do dono. Mínimo 12 caracteres, máximo 128. Sem
+            exigência de maiúsculas/números/símbolos (NIST SP 800-63B).
+            Blocklist de senhas óbvias.
+          minLength: 12
+          maxLength: 128
+          example: "minhasenha12345"
+
+    LoginRequest:
+      type: object
+      description: Credenciais para autenticação.
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          description: E-mail do dono.
+          example: "dono@lojadobairro.com.br"
+        password:
+          type: string
+          format: password
+          description: Senha do dono.
+          example: "senha12345678"
+
+    RefreshRequest:
+      type: object
+      description: Refresh token para renovação de sessão.
+      required:
+        - refreshToken
+      properties:
+        refreshToken:
+          type: string
+          description: |
+            Refresh token opaco obtido no login ou no último refresh.
+            Cada token é de uso único — ao rotacionar, o antigo é invalidado.
+          example: "Neb00hDjS8eIz1onq8ChJxG7G5ctRp7-2nOn3v3QrJYCkr5Vdi_UugV8udlqyZ-W"
+
+    # ---------------------------------------------------------------
+    # Auth — Responses
+    # ---------------------------------------------------------------
+    RegisterResponse:
+      type: object
+      description: Dados da conta e dono criados.
+      required:
+        - account
+        - owner
+      properties:
+        account:
+          $ref: "#/components/schemas/AccountSummary"
+        owner:
+          $ref: "#/components/schemas/OwnerSummary"
+
+    LoginResponse:
+      type: object
+      description: |
+        Tokens de autenticação e dados do owner/account. O `accessToken`
+        deve ser enviado no header `Authorization: Bearer <token>` em
+        todas as rotas protegidas.
+      required:
+        - accessToken
+        - expiresIn
+        - refreshToken
+        - owner
+        - account
+      properties:
+        accessToken:
+          type: string
+          description: |
+            JWT assinado com HS256. Expira em 15 minutos (900 segundos).
+            Enviar no header `Authorization: Bearer <accessToken>`.
+          example: "eyJhbGciOiJIUzI1NiIs..."
+        expiresIn:
+          type: integer
+          description: Tempo de vida do access token em segundos.
+          example: 900
+        refreshToken:
+          type: string
+          description: |
+            Token opaco para renovação. Uso único — ao chamar
+            `/api/auth/refresh`, o token atual é invalidado e um
+            novo par é emitido.
+          example: "Neb00hDjS8eIz1onq8Ch..."
+        owner:
+          $ref: "#/components/schemas/OwnerDetail"
+        account:
+          $ref: "#/components/schemas/AccountSummary"
+
+    RefreshResponse:
+      type: object
+      description: Novo par de tokens após rotação do refresh token.
+      required:
+        - accessToken
+        - expiresIn
+        - refreshToken
+      properties:
+        accessToken:
+          type: string
+          description: Novo access token JWT.
+          example: "eyJhbGciOiJIUzI1NiIs..."
+        expiresIn:
+          type: integer
+          description: Tempo de vida do access token em segundos.
+          example: 900
+        refreshToken:
+          type: string
+          description: Novo refresh token (o antigo foi invalidado).
+          example: "uzKUIGAXmvzDyHa-1cYA..."
+
+    # ---------------------------------------------------------------
+    # Auth — Sub-schemas
+    # ---------------------------------------------------------------
+    AccountSummary:
+      type: object
+      description: Resumo da conta (dados públicos, sem dados sensíveis).
+      required:
+        - id
+        - businessName
+        - document
+        - status
+      properties:
+        id:
+          type: string
+          description: Identificador único da conta.
+          example: acc_1
+        businessName:
+          type: string
+          description: Razão social ou nome fantasia.
+          example: "Loja do Bairro Ltda"
+        document:
+          type: string
+          description: CPF ou CNPJ formatado com máscara.
+          example: "12.345.678/0001-95"
+        status:
+          type: string
+          description: |
+            Status da conta no ciclo de vida:
+            `pendente_verificacao` → `ativa` → `suspensa` → `encerrada`
+          enum:
+            - pendente_verificacao
+            - ativa
+            - suspensa
+            - encerrada
+          example: ativa
+
+    OwnerSummary:
+      type: object
+      description: |
+        Resumo do dono (retornado no registro). Não inclui dados
+        sensíveis como `passwordHash`, `failedLoginAttempts` ou `lockedUntil`.
+      required:
+        - id
+        - name
+        - email
+        - role
+      properties:
+        id:
+          type: string
+          description: Identificador único do owner.
+          example: owner_1
+        name:
+          type: string
+          description: Nome completo do dono.
+          example: "Dono da Loja"
+        email:
+          type: string
+          format: email
+          description: E-mail normalizado.
+          example: "dono@lojadobairro.com.br"
+        role:
+          type: string
+          description: Papel do owner na conta.
+          enum:
+            - proprietario
+          example: proprietario
+
+    OwnerDetail:
+      type: object
+      description: |
+        Detalhes do dono (retornado no login). Inclui dados de sessão
+        mas nunca `passwordHash`, `failedLoginAttempts` ou `lockedUntil`.
+      required:
+        - id
+        - name
+        - email
+        - role
+        - emailVerified
+        - lastLoginAt
+      properties:
+        id:
+          type: string
+          description: Identificador único do owner.
+          example: owner_1
+        name:
+          type: string
+          description: Nome completo do dono.
+          example: "Dono da Loja"
+        email:
+          type: string
+          format: email
+          description: E-mail normalizado.
+          example: "dono@lojadobairro.com.br"
+        role:
+          type: string
+          description: Papel do owner na conta.
+          enum:
+            - proprietario
+          example: proprietario
+        emailVerified:
+          type: boolean
+          description: Se o e-mail foi verificado.
+          example: true
+        lastLoginAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Data/hora do último login bem-sucedido. `null` se nunca logou.
+          example: "2026-09-07T18:13:53.754Z"
+
+    # ---------------------------------------------------------------
+    # Dashboard
+    # ---------------------------------------------------------------
+    DashboardOverviewResponse:
+      type: object
+      description: |
+        Formato de saída da visão geral do Painel do Dono. Cobre os
+        4 cards de KPI e a tabela "Resumo por PDV".
+      required:
+        - totalTodayCents
+        - totalMonthCents
+        - estimatedSavingsCents
+        - activePdvs
+        - totalPdvs
+        - pdvs
+      properties:
+        totalTodayCents:
+          type: integer
+          description: |
+            Faturamento total **do dia** (soma de todos os PDVs),
+            em centavos. Divida por 100 para exibir em R$.
+          example: 207250
+        totalMonthCents:
+          type: integer
+          description: |
+            Faturamento total **do mês corrente** (soma de todos os PDVs),
+            em centavos.
+          example: 3560440
+        estimatedSavingsCents:
+          type: integer
+          description: |
+            Economia estimada em taxas no mês. Calculada como ~1% do
+            faturamento mensal (taxa de referência do Pix Cobrança).
+            Em centavos.
+          example: 35604
+        activePdvs:
+          type: integer
+          description: Quantidade de PDVs com status `ativo`.
+          example: 2
+        totalPdvs:
+          type: integer
+          description: Quantidade total de PDVs (todos os status).
+          example: 3
+        pdvs:
+          type: array
+          description: Resumo individual de cada PDV.
+          items:
+            $ref: "#/components/schemas/PdvSummary"
+
+    PdvSummary:
+      type: object
+      description: |
+        Resumo de um ponto de venda, contendo identificação, status e
+        métricas de faturamento para a tabela do dashboard.
+      required:
+        - id
+        - name
+        - prefix
+        - status
+        - todayCents
+        - monthCents
+        - transactionsThisMonth
+      properties:
+        id:
+          type: string
+          description: Identificador único do PDV.
+          example: pdv_1
+        name:
+          type: string
+          description: Nome de exibição do PDV.
+          example: "Caixa Balcão"
+        prefix:
+          type: string
+          description: |
+            Prefixo do `txid` usado para rastrear a origem de cada
+            recebimento no extrato bancário.
+          example: CXB
+        status:
+          type: string
+          description: Status atual do PDV.
+          enum:
+            - ativo
+            - pendente
+            - inativo
+          example: ativo
+        todayCents:
+          type: integer
+          description: Faturamento do PDV **hoje**, em centavos.
+          example: 84250
+        monthCents:
+          type: integer
+          description: Faturamento do PDV **no mês corrente**, em centavos.
+          example: 1481400
+        transactionsThisMonth:
+          type: integer
+          description: Quantidade de transações confirmadas (pareadas) no mês.
+          example: 10
+
+    # ---------------------------------------------------------------
+    # PDVs
+    # ---------------------------------------------------------------
+    PdvListItem:
+      type: object
+      description: |
+        Resumo de um ponto de venda retornado na listagem.
+      required:
+        - id
+        - name
+        - txidPrefix
+        - status
+        - todayCents
+        - monthCents
+        - transactionsThisMonth
+        - accessCodeMasked
+        - createdAt
+      properties:
+        id:
+          type: string
+          description: Identificador único do PDV.
+          example: pdv_1
+        name:
+          type: string
+          description: Nome de exibição do PDV.
+          example: "Caixa Balcão"
+        txidPrefix:
+          type: string
+          description: Prefixo do `txid` usado para rastrear recebimentos no extrato bancário.
+          example: CXB
+        status:
+          type: string
+          description: Status atual do PDV.
+          enum:
+            - ativo
+            - pendente
+            - inativo
+          example: ativo
+        todayCents:
+          type: integer
+          description: Faturamento do PDV hoje, em centavos.
+          example: 84250
+        monthCents:
+          type: integer
+          description: Faturamento do PDV no mês corrente, em centavos.
+          example: 1481400
+        transactionsThisMonth:
+          type: integer
+          description: Quantidade de transações confirmadas (pareadas) no mês.
+          example: 10
+        accessCodeMasked:
+          type: string
+          description: Código de acesso mascarado. Nunca retorna o valor real aqui.
+          example: "••••••"
+        createdAt:
+          type: string
+          format: date-time
+          description: Data de criação do PDV.
+          example: "2025-02-01T08:00:00.000Z"
+
+    PdvListResponse:
+      type: object
+      required:
+        - pdvs
+      properties:
+        pdvs:
+          type: array
+          items:
+            $ref: "#/components/schemas/PdvListItem"
+
+    CreatePdvRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          description: Nome do PDV (máximo 60 caracteres).
+          maxLength: 60
+          example: "Caixa 2 — Loja Centro"
+
+    CreatePdvResponse:
+      type: object
+      description: |
+        Resposta após a criação do PDV. É o ÚNICO momento em que
+        `accessCode` é retornado em texto plano.
+      required:
+        - id
+        - name
+        - txidPrefix
+        - status
+        - accessCode
+        - createdAt
+      properties:
+        id:
+          type: string
+          example: pdv_4
+        name:
+          type: string
+          example: "Caixa 2 — Loja Centro"
+        txidPrefix:
+          type: string
+          example: C2LC
+        status:
+          type: string
+          example: pendente
+        accessCode:
+          type: string
+          description: |
+            Código de acesso de 6 dígitos gerado aleatoriamente.
+            Armazene-o com segurança ou forneça ao vendedor, pois não poderá
+            ser visualizado novamente (apenas rotacionado).
+          example: "482913"
+        createdAt:
+          type: string
+          format: date-time
+          example: "2026-09-06T12:00:00.000Z"
+
+    RotateAccessCodeResponse:
+      type: object
+      description: |
+        Resposta após rotacionar o código de acesso. Retorna o NOVO código
+        em texto plano, que também será a última vez que poderá ser visto.
+      required:
+        - accessCode
+      properties:
+        accessCode:
+          type: string
+          description: O novo código de acesso gerado.
+          example: "917430"
+
+
+    # ---------------------------------------------------------------
+    # Bank Connection
+    # ---------------------------------------------------------------
+    ConfigureBankConnectionResponse:
+      type: object
+      required:
+        - integrationNotAfter
+        - daysUntilExpiry
+        - handshakeVerified
+      properties:
+        integrationNotAfter:
+          type: string
+          format: date-time
+          description: Data/hora limite para uso da integração (validade do certificado).
+          example: "2027-03-14T12:00:00Z"
+        daysUntilExpiry:
+          type: integer
+          description: Dias restantes até a expiração da integração.
+          example: 549
+        handshakeVerified:
+          type: boolean
+          description: Se o teste inicial via mTLS foi validado com sucesso com o banco.
+          example: true
+
+    GetBankConnectionStatusResponse:
+      type: object
+      required:
+        - configured
+        - status
+      properties:
+        configured:
+          type: boolean
+          description: Verdadeiro se há uma conexão ativa configurada.
+          example: true
+        provider:
+          type: string
+          description: Provedor da conexão bancária (ex. 'inter').
+          example: "inter"
+        integrationNotAfter:
+          type: string
+          format: date-time
+          description: Validade do certificado.
+          example: "2027-03-14T12:00:00Z"
+        daysUntilExpiry:
+          type: integer
+          description: Dias restantes até a expiração.
+          example: 549
+        status:
+          type: string
+          enum: [ok, expiring_soon, expired, not_configured]
+          description: Status simplificado da expiração.
+          example: "ok"
+        handshakeVerified:
+          type: boolean
+          description: Se a validação TLS com o banco foi completada no momento do upload.
+          example: true
+        updatedAt:
+          type: string
+          format: date-time
+          description: Data da última modificação.
+          example: "2026-03-14T09:12:00Z"
+
+    # ---------------------------------------------------------------
+    # Seller and PDV Additions
+    # ---------------------------------------------------------------
+    PdvSession:
+      type: object
+      required:
+        - id
+        - startedAt
+        - lastSeenAt
+        - userAgent
+        - isActive
+      properties:
+        id:
+          type: string
+        startedAt:
+          type: string
+          format: date-time
+        lastSeenAt:
+          type: string
+          format: date-time
+        userAgent:
+          type: string
+        isActive:
+          type: boolean
+
+    PdvQrCodeInfo:
+      type: object
+      required:
+        - emvPayload
+        - imageUrlSvg
+        - imageUrlPng
+        - version
+        - merchantName
+      properties:
+        emvPayload:
+          type: string
+        imageUrlSvg:
+          type: string
+        imageUrlPng:
+          type: string
+        version:
+          type: integer
+        merchantName:
+          type: string
+
+    SellerLoginRequest:
+      type: object
+      required:
+        - store
+        - code
+      properties:
+        store:
+          type: string
+        code:
+          type: string
+
+    SellerLoginResponse:
+      type: object
+      required:
+        - session
+        - store
+        - pdv
+        - readiness
+      properties:
+        session:
+          type: object
+          required: [accessToken, refreshToken]
+          properties:
+            accessToken:
+              type: string
+            refreshToken:
+              type: string
+        store:
+          type: object
+          required: [id, businessName, slug]
+          properties:
+            id:
+              type: string
+            businessName:
+              type: string
+            slug:
+              type: string
+        pdv:
+          type: object
+          required: [id, name]
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+        readiness:
+          type: object
+          required: [ready, missingKeys, missingCertificate, inactiveAccount]
+          properties:
+            ready:
+              type: boolean
+            missingKeys:
+              type: boolean
+            missingCertificate:
+              type: boolean
+            inactiveAccount:
+              type: boolean
+
+    SellerRefreshResponse:
+      type: object
+      required:
+        - accessToken
+        - refreshToken
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+
+    SellerContextResponse:
+      type: object
+      required:
+        - store
+        - pdv
+        - readiness
+      properties:
+        store:
+          type: object
+          required: [id, businessName, slug]
+          properties:
+            id:
+              type: string
+            businessName:
+              type: string
+            slug:
+              type: string
+        pdv:
+          type: object
+          required: [id, name]
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+        readiness:
+          type: object
+          required: [ready, missingKeys, missingCertificate, inactiveAccount]
+          properties:
+            ready:
+              type: boolean
+            missingKeys:
+              type: boolean
+            missingCertificate:
+              type: boolean
+            inactiveAccount:
+              type: boolean
+
+    SellerReceiptsResponse:
+      type: object
+      required:
+        - totalAmountCents
+        - count
+        - receipts
+      properties:
+        totalAmountCents:
+          type: integer
+        count:
+          type: integer
+        receipts:
+          type: array
+          items:
+            $ref: "#/components/schemas/SellerReceipt"
+
+    SellerReceipt:
+      type: object
+      required:
+        - id
+        - amountCents
+        - status
+        - createdAt
+      properties:
+        id:
+          type: string
+        amountCents:
+          type: integer
+        status:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    # ---------------------------------------------------------------
+    # Erros
+    # ---------------------------------------------------------------
+    ErrorResponse:
+      type: object
+      description: Formato padrão de erro retornado pela API.
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          description: Mensagem de erro amigável.
+          example: "Não foi possível carregar o dashboard."
+        detail:
+          type: string
+          description: Detalhe técnico do erro (quando disponível).
+          example: "Erro desconhecido"
+
+    ErrorNotFound:
+      type: object
+      description: Retornado para qualquer rota não mapeada.
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          description: Mensagem indicando que a rota não existe.
+          example: "Rota não encontrada."

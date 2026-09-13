@@ -1,14 +1,15 @@
-@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap");
 @import "tailwindcss";
+
 
 /* ------------------------------------------------------------------ */
 /* Design tokens — Pixie / PixFree                                    */
 /* ------------------------------------------------------------------ */
 
 @theme {
-  --font-display: "Space Grotesk", sans-serif;
-  --font-sans: "Inter", sans-serif;
-  --font-mono: "IBM Plex Mono", monospace;
+  --font-display: "Poppins", sans-serif;
+  --font-sans: "Poppins", sans-serif;
+  --font-mono: "Poppins", monospace;
 }
 
 /* ------------------------------------------------------------------ */

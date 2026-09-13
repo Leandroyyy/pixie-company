@@ -10,14 +10,20 @@ interface DropzoneProps {
   hint: string;
   filled: boolean;
   filename: string | null;
-  onDrop: (name: string) => void;
+  onDrop: (name: string, file: File | null) => void;
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export function Dropzone({ label, hint, filled, filename, onDrop }: DropzoneProps) {
+export function Dropzone({
+  label,
+  hint,
+  filled,
+  filename,
+  onDrop,
+}: DropzoneProps) {
   const [drag, setDrag] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -31,7 +37,10 @@ export function Dropzone({ label, hint, filled, filename, onDrop }: DropzoneProp
       onDrop={(e) => {
         e.preventDefault();
         setDrag(false);
-        onDrop(e.dataTransfer.files?.[0]?.name || label);
+        const file = e.dataTransfer.files?.[0];
+        if (file) {
+          onDrop(file.name, file);
+        }
       }}
       onClick={() => inputRef.current?.click()}
       className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed px-3 py-6 text-center transition-colors sm:px-4 sm:py-7 ${
@@ -46,7 +55,12 @@ export function Dropzone({ label, hint, filled, filename, onDrop }: DropzoneProp
         ref={inputRef}
         type="file"
         className="hidden"
-        onChange={(e) => e.target.files?.[0] && onDrop(e.target.files[0].name)}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) {
+            onDrop(file.name, file);
+          }
+        }}
       />
       {filled ? (
         <>

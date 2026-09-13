@@ -1,7 +1,8 @@
-import { Settings2 } from "lucide-react";
+import { MailWarning, Settings2 } from "lucide-react";
 import { useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
-import { Sidebar, MobileTopBar } from "./Sidebar";
+import { useAuth } from "../../contexts/AuthContext";
+import { MobileTopBar, Sidebar } from "./Sidebar";
 
 // ---------------------------------------------------------------------------
 // Page metadata derivada da rota
@@ -34,6 +35,7 @@ export function AppLayout() {
   const [navOpen, setNavOpen] = useState(false);
   const { pathname } = useLocation();
   const meta = routeMeta[pathname] ?? fallbackMeta;
+  const { owner } = useAuth();
 
   return (
     <div className="flex h-full min-h-[720px] w-full bg-stone-50">
@@ -54,13 +56,36 @@ export function AppLayout() {
                   {meta.desc}
                 </div>
               </div>
-              <button className="hidden shrink-0 items-center gap-1.5 rounded-md border border-stone-200 bg-white px-3 py-2 text-[12.5px] font-medium text-stone-500 hover:bg-stone-50 sm:flex">
-                <Settings2 className="h-3.5 w-3.5" /> Configurações
-              </button>
               <button className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-stone-200 bg-white text-stone-500 hover:bg-stone-50 sm:hidden">
                 <Settings2 className="h-4 w-4" />
               </button>
             </div>
+
+            {owner && !owner.emailVerified && (
+              <div className="mb-5 rounded-md border border-amber-200 bg-amber-50 p-4 sm:mb-6">
+                <div className="flex">
+                  <div className="shrink-0">
+                    <MailWarning
+                      className="h-5 w-5 text-amber-500"
+                      aria-hidden="true"
+                    />
+                  </div>
+                  <div className="ml-3">
+                    <h3 className="text-sm font-medium text-amber-800">
+                      Conta aguardando ativação
+                    </h3>
+                    <div className="mt-1 text-sm text-amber-700">
+                      <p>
+                        Enviamos um link de confirmação para o seu e-mail (
+                        <strong>{owner.email}</strong>). Por favor, verifique
+                        sua caixa de entrada para ativar sua conta e ter acesso
+                        completo ao sistema.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <Outlet />
           </div>
